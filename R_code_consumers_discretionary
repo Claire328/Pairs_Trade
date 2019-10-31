@@ -1,0 +1,140 @@
+#Pairs trading can be done on many assets, e.g. stocks, bonds, ETFs, currencies, etc.
+#This example is for S&P 500 Consumer Discretionary sector
+
+#load packages, use pacman to manage packages 
+if("pacman" %in% rownames(installed.packages()) == FALSE) {install.packages("pacman")} # Check if you have universal installer package, install if not
+pacman::p_load("tseries","quantmod","PerformanceAnalytics","roll","urca","dplyr","corrplot","ggplot")
+
+#data: can either be imported or pre-downloaded then read in R
+#data importing using Yahoo API
+tickers <- c('AAP','AMZN','AZO','BBY','BKNG','BWA','CCL','CMG','DHI','DLTR','DRI','EBAY','EXPE','F','GPC','GPS','GRMN','HAS','HBI','HD','HOG','HRB','JWN','KMX','KSS','LB','LEG','LEN','LKQ','LOW','M','MAR','MCD','MGM','MHK','NKE','NVR','NWL','ORLY','PHM','PVH','RCL','RL','ROST','SBUX','TGT','TIF','TJX','TPR','TSCO','UAA','ULTA','VFC','WHR','WYNN','YUM')
+getSymbols(tickers,src='yahoo',from='2009-01-01',to='2019-01-01')
+data <- cbind(AAP[,6],AMZN[,6],AZO[,6],BBY[,6],BKNG[,6],BWA[,6],CCL[,6],CMG[,6],DHI[,6],DLTR[,6],DRI[,6],EBAY[,6],EXPE[,6],F[,6],GPC[,6],GPS[,6],GRMN[,6],HAS[,6],HBI[,6],HD[,6],HOG[,6],HRB[,6],JWN[,6],KMX[,6],KSS[,6],LB[,6],LEG[,6],LEN[,6],LKQ[,6],LOW[,6],M[,6],MAR[,6],MCD[,6],MGM[,6],MHK[,6],NKE[,6],NVR[,6],NWL[,6],ORLY[,6],PHM[,6],PVH[,6],RCL[,6],RL[,6],ROST[,6],SBUX[,6],TGT[,6],TIF[,6],TJX[,6],TPR[,6],TSCO[,6],UAA[,6],ULTA[,6],VFC[,6],WHR[,6],WYNN[,6],YUM[,6])
+data <- na.exclude(data)
+ncol(data)
+colnames(data) <- c('AAP','AMZN','AZO','BBY','BKNG','BWA','CCL','CMG','DHI','DLTR','DRI','EBAY','EXPE','F','GPC','GPS','GRMN','HAS','HBI','HD','HOG','HRB','JWN','KMX','KSS','LB','LEG','LEN','LKQ','LOW','M','MAR','MCD','MGM','MHK','NKE','NVR','NWL','ORLY','PHM','PVH','RCL','RL','ROST','SBUX','TGT','TIF','TJX','TPR','TSCO','UAA','ULTA','VFC','WHR','WYNN','YUM')
+
+#save data file
+write.csv(data,"Consumer_disc.csv")
+
+set.seed(100)
+
+#Tain/test split
+tdata <- data['::2017-12-31']
+fdata <- data['2018-01-01::']
+
+#corr plot
+t_test<-tdata
+ncol(t_test)
+
+for(i in 1:56)
+{t_test[,i]=dailyReturn(t_test[,i],type='arithmetic')
+}
+summary(t_test)
+
+correlations<-cor(t_test)
+correlations
+
+row_indic <- apply(correlations, 1, function(x) sum(x > 0.75 | x < - 0.75) > 1)
+correlations<- correlations[row_indic ,row_indic ]
+corrplot(correlations,type = "upper", tl.pos = "td",
+         method = "circle", tl.cex = 0.5, tl.col = 'black',
+         order = "hclust", diag = FALSE)
+
+#subset the stocks with higher corr (0.75)
+hi_cor<-c('CCL','RCL','PHM','DHI','LEN','HD','LOW')
+tdata <- tdata[,hi_cor]
+fdata <- fdata[,hi_cor]
+
+#loop to test for co-integration of all pairs among the 7
+for(i in 1:7)
+  for(j in 1:7)
+  {
+    col_i <- tdata[,i]
+    col_j<- tdata[,j]
+    rTcol_i <- dailyReturn(col_i,type='arithmetic')
+    rTcol_j <- dailyReturn(col_j,type='arithmetic')
+    colnames(rTcol_i)<-colnames(col_i) 
+    colnames(rTcol_j)<-colnames(col_j)
+    cat("This is to test for the pair of",
+        colnames(tdata[,i]),"and",colnames(tdata[,j]),
+        "and their correlation is",cor(rTcol_i,rTcol_j))
+    
+    # Spread Calculation
+    tintsp2 <- col_i-lm(col_i~0+col_j)$coefficients[1]*col_j
+    tintspm2 <- xts(rep(mean(tintsp2),length(tintsp2)),order.by=as.Date(index(tintsp2)))
+    
+    # Non-Stationary Prices
+    adf.test(col_i)
+    adf.test(col_j)
+    adf.test(na.exclude(diff(col_i,lag=1)))
+    adf.test(na.exclude(diff(col_j,lag=1)))
+    
+    # Stationary Spread
+    print(adf.test(tintsp2))
+    print(pp.test(tintsp2,lshort=F))
+    
+  }
+
+
+#DHI-HD is the selected pair 
+
+THD <- tdata[,grep("HD",colnames(tdata))]
+TDHI <- tdata[,grep("DHI",colnames(tdata))]
+rTHD <- dailyReturn(THD,type='arithmetic')
+rTDHI <- dailyReturn(TDHI,type='arithmetic')
+colnames(rTHD) <- 'rTHD'
+colnames(rTDHI) <- 'rTDHI'
+cor(rTHD,rTDHI)
+chart.CumReturns(cbind(rTHD,rTDHI),main='HD-DHI Pair Cumulative Returns',legend.loc='bottomright')
+
+tintsp2 <- THD-lm(THD~0+TDHI)$coefficients[1]*TDHI
+tintspm2 <- xts(rep(mean(tintsp2),length(tintsp2)),order.by=as.Date(index(tintsp2)))
+plot(cbind(tintsp2,tintspm2),main='HD-DHI Spread')
+
+
+# HD-DHI Pair Trading Strategy
+# HD-DHI Rolling Spread Z-Score
+fHD <- fdata[,grep("HD",colnames(tdata))]
+fDHI <- fdata[,grep("DHI",colnames(tdata))]
+fintsp2 <- fHD-lm(THD~0+TDHI)$coefficients[1]*fDHI
+fintz2 <- roll_scale(fintsp2,width=21)
+fut1 <- xts(rep(1,length(fdata[,1])),order.by=as.Date(index(fdata)))
+fut2 <- xts(rep(2,length(fdata[,1])),order.by=as.Date(index(fdata)))
+flt1 <- xts(rep(-1,length(fdata[,1])),order.by=as.Date(index(fdata)))
+flt2 <- xts(rep(-2,length(fdata[,1])),order.by=as.Date(index(fdata)))
+plot(cbind(fintz2,fut1,fut2,flt1,flt2),main='Rolling Spread Z-score')
+
+# HD-DHI Trading Strategy Signals 
+fintsig2 <- lag(ifelse(lag(fintz2)>(-2.5)&fintz2<(-2.5),-2,
+                       ifelse(lag(fintz2)<(-0.5)&fintz2>(-0.5),-1,
+                              ifelse(lag(fintz2)<(-3.5)&fintz2>(-3.5),-1, #stop loss
+                                     ifelse(lag(fintz2)<2.5&fintz2>2.5,2,
+                                            ifelse(lag(fintz2)>0.5&fintz2<0.5,1,
+                                                   ifelse(lag(fintz2)>3.5&fintz2<3.5,1, #stop loss
+                                                          0)))))))
+fintsig2[is.na(fintsig2)] <- 0
+
+# HD-DHI Trading Strategy Positions
+fintpos2 <- ifelse(fintsig2>2,1,0)
+for(i in 1:length(fintz2)){fintpos2[i] <- ifelse(fintsig2[i]==-2,1,
+                                                 ifelse(fintsig2[i]==-1,0,
+                                                        ifelse(fintsig2[i]==2,-1,
+                                                               ifelse(fintsig2[i]==1,0,fintpos2[i-1]))))}
+fintpos2[is.na(fintpos2)] <- 0
+finttr2 <- cbind(fintz2,fintsig2,fintpos2)
+colnames(finttr2) <- c('Z-Score','Signal','Position')
+View(finttr2)
+
+# HD-DHI Pair Strategy Performance Comparison
+rfHD <- dailyReturn(fHD,type='arithmetic')
+rfDHI <- dailyReturn(fDHI,type='arithmetic')
+rfintsp2 <- rfHD-lm(THD~0+TDHI)$coefficients[1]*rfDHI
+rfint2 <- fintpos2*rfintsp2
+rfint2c <- ifelse((fintsig2==-2|fintsig2==-1|fintsig2==2|fintsig2==1)
+                  &fintpos2!=lag(fintpos2),
+                  (rfintsp2*fintpos2)-0.001,rfintsp2*fintpos2)
+fintcomp2 <- cbind(rfint2c,rfHD,rfDHI)
+colnames(fintcomp2) <- c('rfint2c','rfHD','rfDHI')
+
+table.AnnualizedReturns(fintcomp2)
